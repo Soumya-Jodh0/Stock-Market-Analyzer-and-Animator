@@ -23,6 +23,7 @@ def process_csv():
         return jsonify({"error": "Missing 'file'"}), 400
     f = request.files['file']
     try:
+        # The CSV is read and decoded, then parsed by the utility function
         series = parse_csv_prices(f.stream.read().decode('utf-8'))
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
@@ -30,34 +31,7 @@ def process_csv():
     result = find_best_trade(series)
     return jsonify(result)
 
-@app.route('/api/process_json', methods=['POST'])
-def process_json():
-    """
-    Accepts JSON payload:
-    { "series": [ {"date":"YYYY-MM-DD","price": 123.45}, ... ] }
-    """
-    data = request.get_json()
-    if not data or 'series' not in data:
-        return jsonify({"error": "Missing 'series' in JSON body"}), 400
-    series = data['series']
-    # Basic validation
-    if not isinstance(series, list) or len(series) < 2:
-        return jsonify({"error": "series must be a list with at least 2 points"}), 400
-
-    # normalize and validate entries
-    cleaned = []
-    for p in series:
-        if 'price' not in p:
-            return jsonify({"error": "each entry must have 'price' and 'date'"}), 400
-        try:
-            price = float(p['price'])
-        except Exception:
-            return jsonify({"error": f"invalid price: {p.get('price')}"}), 400
-        date = p.get('date', '')
-        cleaned.append({"date": date, "price": price})
-
-    result = find_best_trade(cleaned)
-    return jsonify(result)
+# The /api/process_json route is completely removed as requested.
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
