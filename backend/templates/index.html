@@ -2,182 +2,178 @@
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Stock Animator</title>
+  <title>Stock Analyzer</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <link rel="stylesheet" href="static/style.css" />
-  <!-- Chart.js from CDN -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
   <div class="container">
-    <h1>Stock Market Analyzer & Animator</h1>
+    <h1>Stock Market Analyzer</h1>
 
-    <div class="controls">
-      <label>Upload CSV (date,price) or paste JSON</label>
-      <input id="csvFile" type="file" accept=".csv" />
-      <button id="btnUpload">Upload & Process</button>
+    <div class="input-section">
+      <h3>1. Upload Data</h3>
+      <div class="controls">
+        <label for="csvFile">Upload CSV (date,price)</label>
+        <input id="csvFile" type="file" accept=".csv" />
+        <button id="btnUpload" class="primary">Upload & Process</button>
+      </div>
     </div>
 
-    <div class="result" id="resultBox" style="display:none;">
-      <p id="summary"></p>
-      <canvas id="chart" width="800" height="400"></canvas>
-    </div>
+    <div id="loading" class="spinner" style="display:none;">Processing Data...</div>
 
     <hr />
-    <div>
-      <!-- <h3>Quick JSON POST example</h3>
-      <pre>
-{
-  "series":[
-    {"date":"2025-10-10","price":100},
-    {"date":"2025-10-13","price":98},
-    {"date":"2025-10-16","price":110}
-  ]
-} -->
-      </pre>
+
+    <div class="result" id="resultBox" style="display:none;">
+      <h3>2. Analysis Result</h3>
+      <p id="summary"></p>
+      <div class="chart-container">
+        <canvas id="chart"></canvas>
+      </div>
     </div>
   </div>
 
 <script>
-const apiUrl = '/api/process_csv'; // same-origin
+const apiUrl = '/api/process_csv';
+const loadingEl = document.getElementById('loading');
 
-function animateLine(chart, dataPoints) {
-  // draw progressive animation by updating dataset point count
-  const total = dataPoints.length;
-  let current = 1;
-  chart.data.datasets[0].data = dataPoints.slice(0, current);
-  chart.update();
+// --- CHART RENDERING LOGIC (Improved for Buy/Sell Highlights) ---
 
-  const step = () => {
-    current++;
-    if (current > total) return;
-    chart.data.datasets[0].data = dataPoints.slice(0, current);
-    chart.update();
-    requestAnimationFrame(step);
-  };
-  requestAnimationFrame(step);
-}
-
-function drawChart(series, buyIdx, sellIdx) {
-  const labels = series.map(p => p.date || "");
-  const values = series.map(p => p.price);
-
-  const ctx = document.getElementById('chart').getContext('2d');
-
-  // destroy old chart if present
-  if (window._stockChart) {
-    window._stockChart.destroy();
+function drawChart(data, buyIndex, sellIndex) {
+  const chartCanvas = document.getElementById('chart');
+  
+  if (window.myChart) {
+    window.myChart.destroy();
   }
 
-  window._stockChart = new Chart(ctx, {
+  // 1. Point Color Styling: Green for buy, Red for sell
+  const pointColorCallback = (context) => {
+    const xIndex = context.parsed.x; 
+    if (xIndex === buyIndex) return 'var(--color-success)'; // Green for Buy
+    if (xIndex === sellIndex) return 'var(--color-danger)';  // Red for Sell
+    return 'rgba(59, 130, 246, 0.5)'; // Default point color
+  };
+
+  // 2. Line Segment Styling: Gold for the profitable trade period
+  const segmentBorderColorCallback = (context) => {
+    const p0Index = context.p0.parsed.x;
+    const p1Index = context.p1.parsed.x;
+    // Check if the segment is within the best trade period (buyIndex to sellIndex)
+    const isTradeSegment = p0Index >= buyIndex && p1Index <= sellIndex && buyIndex !== sellIndex;
+    return isTradeSegment ? 'var(--color-warning)' : 'var(--color-primary)'; // Gold or Blue
+  };
+  
+  // 3. Line Width: Make the profitable segment line thicker
+  const segmentLineWidthCallback = (context) => {
+      const p0Index = context.p0.parsed.x; 
+      const p1Index = context.p1.parsed.x;
+      const isTradeSegment = p0Index >= buyIndex && p1Index <= sellIndex && buyIndex !== sellIndex;
+      return isTradeSegment ? 4 : 2; // Thicker line for the highlighted segment
+  };
+  
+  window.myChart = new Chart(chartCanvas, {
     type: 'line',
     data: {
-      labels,
+      labels: data.map(p => p.date),
       datasets: [{
-        label: 'Price',
-        data: [], // initially empty for animation
+        label: 'Stock Price',
+        data: data.map(p => p.price),
+        fill: false,
+        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+        borderColor: 'var(--color-primary)',
         borderWidth: 2,
-        tension: 0.2,
-        pointRadius: 3,
-        fill: false
+        tension: 0.1,
+        
+        // Apply point and segment styles
+        pointBackgroundColor: pointColorCallback, 
+        pointRadius: 5,
+        pointHoverRadius: 7,
+        
+        elements: {
+            line: {
+                segment: {
+                    borderColor: segmentBorderColorCallback,
+                    borderWidth: segmentLineWidthCallback,
+                }
+            }
+        }
       }]
     },
     options: {
-      animation: false,
-      scales: {
-        x: { display: true },
-        y: { display: true, beginAtZero: false }
-      },
-      plugins: {
-        tooltip: { enabled: true },
-        legend: { display: false }
-      }
+        responsive: true,
+        maintainAspectRatio: false,
+        scales: {
+            x: {
+                title: { display: true, text: 'Date' }
+            },
+            y: {
+                title: { display: true, text: 'Price (₹)' }
+            }
+        },
+        plugins: {
+            legend: { display: false },
+            tooltip: { mode: 'index', intersect: false }
+        }
     }
   });
-
-  // animate drawing
-  const dataPoints = values.map(v => ({ x: null, y: v })); // Chart.js accepts numbers as well
-  animateLine(window._stockChart, values);
-
-  // after short delay mark buy/sell with custom points & vertical lines
-  setTimeout(() => {
-    // add markers dataset
-    window._stockChart.data.datasets.push({
-      label: 'Buy/Sell',
-      data: values.map((v,i) => {
-        if (i === buyIdx) return v;
-        if (i === sellIdx) return v;
-        return null;
-      }),
-      showLine: false,
-      pointRadius: values.map((_,i)=> (i===buyIdx||i===sellIdx)?8:0),
-      pointStyle: values.map((_,i)=> (i===buyIdx)?'triangle':'rectRot'),
-      // colors are left default to Chart.js; not specifying specific colors per requirement
-    });
-    window._stockChart.update();
-  }, 600);
 }
-
-async function processFile(file) {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch('/api/process_csv', { method: 'POST', body: form });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'Server error');
-  return data;
-}
-
-async function processSample() {
-  // send JSON to /api/process_json for sample
-  const sample = {
-    series: [
-      {"date":"2025-10-10","price":100},
-      {"date":"2025-10-13","price":98},
-      {"date":"2025-10-14","price":105},
-      {"date":"2025-10-15","price":102},
-      {"date":"2025-10-16","price":110},
-      {"date":"2025-10-17","price":108}
-    ]
-  };
-  const res = await fetch('/api/process_json', {
-    method: 'POST',
-    headers: { 'Content-Type':'application/json' },
-    body: JSON.stringify(sample)
-  });
-  return res.json();
-}
-
-document.getElementById('btnUpload').addEventListener('click', async () => {
-  const f = document.getElementById('csvFile').files[0];
-  if (!f) return alert('Please select a CSV file first.');
-  try {
-    const data = await processFile(f);
-    showResult(data);
-  } catch (err) {
-    alert('Error: ' + err.message);
-  }
-});
-
-document.getElementById('btnSample').addEventListener('click', async () => {
-  try {
-    const data = await processSample();
-    if (data.error) throw new Error(data.error);
-    showResult(data);
-  } catch (err) {
-    alert('Error: ' + err.message);
-  }
-});
 
 function showResult(data) {
   document.getElementById('resultBox').style.display = 'block';
   const buy = data.best_buy;
   const sell = data.best_sell;
-  const profit = data.profit;
-  const s = data.series;
-  const summary = `Buy on ${buy.date} (index ${buy.index}) at ${buy.price} — Sell on ${sell.date} (index ${sell.index}) at ${sell.price}. Profit: ${profit}`;
-  document.getElementById('summary').innerText = summary;
-  drawChart(s, buy.index, sell.index);
+  const profit = sell.price - buy.price;
+  const profitStr = profit.toFixed(2);
+  const dataSeries = data.series;
+  
+  const summaryEl = document.getElementById('summary');
+  let summaryHTML = `Best Trade Summary: Buy on ${buy.date} at ₹${buy.price.toFixed(2)} and Sell on ${sell.date} at ₹${sell.price.toFixed(2)}. `;
+  
+  if (profit > 0) {
+      summaryHTML += `Profit: <span class="profit-highlight">₹${profitStr}</span>. 🎉`;
+  } else {
+      summaryHTML += `Best possible trade resulted in a <span class="loss-highlight">Loss/No Profit: ₹${profitStr}</span>. 😔`;
+  }
+
+  summaryEl.innerHTML = summaryHTML;
+  
+  drawChart(dataSeries, buy.index, sell.index);
 }
+
+
+// --- CORE FILE PROCESSING LOGIC ---
+
+async function processFile(file) {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const res = await fetch(apiUrl, {
+    method: 'POST',
+    body: formData
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Server error');
+  return data;
+}
+
+// Event Listener for the only remaining button: CSV Upload
+document.getElementById('btnUpload').addEventListener('click', async () => {
+  const f = document.getElementById('csvFile').files[0];
+  if (!f) return alert('Please select a CSV file first.');
+  
+  loadingEl.style.display = 'block';
+  document.getElementById('resultBox').style.display = 'none';
+
+  try {
+    const data = await processFile(f);
+    if (data.error) throw new Error(data.error);
+    showResult(data);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  } finally {
+    loadingEl.style.display = 'none';
+  }
+});
 </script>
 </body>
 </html>
